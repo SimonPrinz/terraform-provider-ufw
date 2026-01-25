@@ -25,16 +25,16 @@ provider "ufw" {
 
 resource "ufw_status" "status" {
   enabled = true
+
+  # enable ufw only when ssh is allowed
+  depends_on = [ufw_rule.allow_ssh]
 }
 
 resource "ufw_rule" "allow_ssh" {
-  action = "allow"
+  action   = "allow"
   protocol = "tcp"
-  port = 22
-  comment = "Allow SSH"
-
-  # enable ufw only when ssh is allowed
-  depends_on = [ufw_status.status]
+  port     = 22
+  comment  = "Allow SSH"
 }
 
 # resource "ufw_rule" "allow_http" {

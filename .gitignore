@@ -1,6 +1,8 @@
 .idea/
 
 /terraform-provider-ufw
+.terraform/
+.terraform.lock.hcl
 *.tfvars
 *.tfstate
 *.tfstate.backup
