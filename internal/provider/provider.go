@@ -33,10 +33,14 @@ type UfwProvider struct {
 }
 
 type UfwProviderModel struct {
-	Host     types.String `tfsdk:"host"`
-	Port     types.Int32  `tfsdk:"port"`
-	Username types.String `tfsdk:"username"`
-	Password types.String `tfsdk:"password"`
+	Host               types.String `tfsdk:"host"`
+	Port               types.Int32  `tfsdk:"port"`
+	Username           types.String `tfsdk:"username"`
+	Password           types.String `tfsdk:"password"`
+	PrivateKey         types.String `tfsdk:"private_key"`
+	PrivateKeyFile     types.String `tfsdk:"private_key_file"`
+	PrivateKeyPassword types.String `tfsdk:"private_key_password"`
+	UseSshAgent        types.Bool   `tfsdk:"use_ssh_agent"`
 }
 
 func (p *UfwProvider) Metadata(_ context.Context, _ provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -59,8 +63,27 @@ func (p *UfwProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *
 				Required: true,
 			},
 			"password": schema.StringAttribute{
-				Required:  true,
+				Required:  false,
+				Optional:  true,
 				Sensitive: true,
+			},
+			"private_key": schema.StringAttribute{
+				Required:  false,
+				Optional:  true,
+				Sensitive: true,
+			},
+			"private_key_file": schema.StringAttribute{
+				Required: false,
+				Optional: true,
+			},
+			"private_key_password": schema.StringAttribute{
+				Required:  false,
+				Optional:  true,
+				Sensitive: true,
+			},
+			"use_ssh_agent": schema.BoolAttribute{
+				Required: false,
+				Optional: true,
 			},
 		},
 	}
@@ -88,13 +111,6 @@ func (p *UfwProvider) Configure(ctx context.Context, req provider.ConfigureReque
 			"Username must be set",
 		)
 	}
-	if config.Password.IsUnknown() {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("password"),
-			"Unknown password",
-			"Password must be set",
-		)
-	}
 
 	if resp.Diagnostics.HasError() {
 		return
@@ -103,7 +119,6 @@ func (p *UfwProvider) Configure(ctx context.Context, req provider.ConfigureReque
 	host := config.Host.ValueString()
 	port := uint(22)
 	username := config.Username.ValueString()
-	password := config.Password.ValueString()
 
 	if !config.Port.IsNull() {
 		port = uint(config.Port.ValueInt32())
@@ -123,11 +138,58 @@ func (p *UfwProvider) Configure(ctx context.Context, req provider.ConfigureReque
 			"Username must be set",
 		)
 	}
-	if password == "" {
+
+	var auth []ssh.AuthMethod
+	if !config.Password.IsUnknown() && !config.Password.IsNull() {
+		auth = append(auth, goph.Password(config.Password.ValueString())...)
+	}
+	if !config.PrivateKey.IsUnknown() && !config.PrivateKey.IsNull() {
+		privateKeyPassword := ""
+		if !config.PrivateKeyPassword.IsUnknown() {
+			privateKeyPassword = config.PrivateKeyPassword.ValueString()
+		}
+		key, err := goph.RawKey(config.PrivateKey.ValueString(), privateKeyPassword)
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("private_key"),
+				"Error reading private key",
+				err.Error(),
+			)
+		}
+		auth = append(auth, key...)
+	}
+	if !config.PrivateKeyFile.IsUnknown() && !config.PrivateKeyFile.IsNull() {
+		privateKeyPassword := ""
+		if !config.PrivateKeyPassword.IsUnknown() {
+			privateKeyPassword = config.PrivateKeyPassword.ValueString()
+		}
+		key, err := goph.Key(config.PrivateKeyFile.ValueString(), privateKeyPassword)
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("private_key_file"),
+				"Error reading private key file",
+				err.Error(),
+			)
+		}
+		auth = append(auth, key...)
+	}
+	if !config.UseSshAgent.IsUnknown() && config.UseSshAgent.ValueBool() {
+		agent, err := goph.UseAgent()
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("use_ssh_agent"),
+				"Error reading ssh agent",
+				err.Error(),
+			)
+		}
+		auth = append(auth, agent...)
+	}
+
+	if len(auth) == 0 {
 		resp.Diagnostics.AddAttributeError(
-			path.Root("password"),
-			"Missing password",
-			"Password must be set",
+			path.Empty(),
+			"Missing Auth Method",
+			"An auth method must be set",
 		)
 	}
 
@@ -139,7 +201,7 @@ func (p *UfwProvider) Configure(ctx context.Context, req provider.ConfigureReque
 		Addr: host,
 		Port: port,
 		User: username,
-		Auth: goph.Password(password),
+		Auth: auth,
 		Callback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			return nil
 		},
