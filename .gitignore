@@ -6,3 +6,4 @@
 *.tfvars
 *.tfstate
 *.tfstate.backup
+*.tfrc
